@@ -7,7 +7,7 @@ from engine import lade_modell, lade_daten, erstelle_optimizer_und_scheduler, tr
 model = lade_modell(MODELL_NAME, PRETRAINED_PFAD, NUM_CLASSES, DEVICE)
 
 train_ds, val_ds, test_ds, train_loader, val_loader, test_loader = lade_daten(
-    model, DATA_DIR, BATCH_SIZE, NUM_WORKERS
+    model, DATA_DIR, BATCH_SIZE, NUM_WORKERS, SUBSET_GROESSE
 )
 
 criterion = nn.CrossEntropyLoss()

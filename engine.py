@@ -1,10 +1,12 @@
 import math
+import random
 import timm
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
+from torch.utils.data import Subset
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from safetensors.torch import load_file
@@ -20,8 +22,7 @@ def lade_modell(modell_name, pretrained_pfad, num_classes, device):
     print("Unerwartete Keys (sollte leer sein):", unexpected)
     return model.to(device)
 
-
-def lade_daten(model, data_dir, batch_size, num_workers):
+def lade_daten(model, data_dir, batch_size, num_workers, subset_groesse=None):
     data_config = timm.data.resolve_model_data_config(model)
     mean, std = data_config["mean"], data_config["std"]
 
@@ -39,6 +40,10 @@ def lade_daten(model, data_dir, batch_size, num_workers):
     val_ds = ImageFolder(f"{data_dir}\\val", transform=val_transform)
     test_ds = ImageFolder(f"{data_dir}\\test", transform=val_transform)
     print(train_ds.class_to_idx)
+
+    if subset_groesse is not None:
+        train_ds = Subset(train_ds, random.sample(range(len(train_ds)), min(subset_groesse, len(train_ds))))
+        val_ds = Subset(val_ds, random.sample(range(len(val_ds)), min(subset_groesse, len(val_ds))))
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
