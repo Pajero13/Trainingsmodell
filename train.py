@@ -21,5 +21,5 @@ if __name__ == "__main__":
     trainiere(
         model, train_loader, val_loader, train_ds, val_ds,
         optimizer, criterion, scheduler, scaler,
-        DEVICE, EPOCHS, CHECKPOINT_PFAD
+        DEVICE, EPOCHS, CHECKPOINT_PFAD,DEVICE
     )

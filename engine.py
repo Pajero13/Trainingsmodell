@@ -1,4 +1,5 @@
 import math
+import time
 import random
 import timm
 import torch
@@ -115,16 +116,65 @@ def evaluate(model, loader, criterion, device, dataset_size):
     return total_loss / dataset_size, correct / dataset_size
 
 
+def formatiere_dauer(sekunden):
+    minuten, sek = divmod(int(sekunden), 60)
+    stunden, minuten = divmod(minuten, 60)
+    if stunden > 0:
+        return f"{stunden}h {minuten}min {sek}s"
+    elif minuten > 0:
+        return f"{minuten}min {sek}s"
+    return f"{sek}s"
+
+
 def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, criterion,
-              scheduler, scaler, device, epochs, checkpoint_pfad):
+              scheduler, scaler, device, epochs, checkpoint_pfad,DEVICE):
     best_val_acc = 0.0
+    best_epoch = None
+    verlauf = []
+    trainingsstart = time.time()
     for epoch in range(epochs):
+        epochenstart = time.time()
+
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, scheduler, scaler, device, len(train_ds))
         val_loss, val_acc = evaluate(model, val_loader, criterion, device, len(val_ds))
-        print(f"Epoche {epoch+1}/{epochs} - Train Loss: {train_loss:.4f} - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}")
 
-        if val_acc > best_val_acc:
+        epochendauer = time.time() - epochenstart
+        ist_bestes = val_acc > best_val_acc
+        status = "[NEU] bestes Modell" if ist_bestes else "(keine Verbesserung)"
+
+        print(f"Epoche {epoch+1:>3}/{epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+              f"Val Acc: {val_acc:.4f} | Dauer: {formatiere_dauer(epochendauer):>10} | {status}")
+
+        verlauf.append({
+            "epoche": epoch + 1,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_acc": val_acc,
+            "dauer_sek": epochendauer,
+            "bestes_modell": ist_bestes,
+        })
+
+        if ist_bestes:
             best_val_acc = val_acc
+            best_epoch = epoch + 1
             torch.save(model.state_dict(), checkpoint_pfad)
-            print(f"  -> Neues bestes Modell gespeichert (Val Acc: {val_acc:.4f})")
-    return best_val_acc
+
+    gesamtdauer = time.time() - trainingsstart
+
+    print("\n" + "=" * 75)
+    print("TRAININGS-ÜBERSICHT")
+    print("=" * 75)
+    print(f"Verwendetes Gerät: {DEVICE}")
+    print(f"Modell liegt auf: {next(model.parameters()).device}")
+    print(f"Gesamtdauer: {formatiere_dauer(gesamtdauer)} für {epochs} Epochen\n")
+    print(f"{'Epoche':>7} | {'Train Loss':>10} | {'Val Loss':>10} | {'Val Acc':>8} | {'Dauer':>10} | Beste?")
+    print("-" * 75)
+    for eintrag in verlauf:
+        markierung = "*" if eintrag["bestes_modell"] else ""
+        print(f"{eintrag['epoche']:>7} | {eintrag['train_loss']:>10.4f} | {eintrag['val_loss']:>10.4f} | "
+              f"{eintrag['val_acc']:>8.4f} | {formatiere_dauer(eintrag['dauer_sek']):>10} | {markierung}")
+    print("-" * 75)
+    print(f"\nBestes Modell: Epoche {best_epoch}, Val Acc: {best_val_acc:.4f}")
+    print(f"Gespeichert unter: {checkpoint_pfad}")
+
+    return verlauf, best_epoch, best_val_acc
