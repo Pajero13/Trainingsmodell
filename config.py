@@ -2,7 +2,7 @@ import torch
 
 # Pfade
 DATA_DIR = r"C:\Users\Andrin\Documents\Maturaarbeit_W11WS16\parktisches_Experiment\Training\Datensatz"
-CHECKPOINT_PFAD = r"C:\Users\Andrin\Documents\ConvNet\Modelle\bestes_modell.pt"
+CHECKPOINT_PFAD = r"C:\Users\Andrin\Documents\Maturaarbeit_W11WS16\parktisches_Experiment\Training\Trainingsmodell\Modelle\bestes_modell.pt"
 PRETRAINED_PFAD = r"C:\Users\Andrin\Documents\ConvNet\Modelle\model.safetensors"
 
 # Modell

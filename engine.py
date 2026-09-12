@@ -27,18 +27,19 @@ def lade_daten(model, data_dir, batch_size, num_workers, subset_groesse=None):
     mean, std = data_config["mean"], data_config["std"]
 
     train_transform = transforms.Compose([
+        transforms.Resize((384, 384)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std),
     ])
     val_transform = transforms.Compose([
+        transforms.Resize((384, 384)),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std),
     ])
 
     train_ds = ImageFolder(f"{data_dir}\\train", transform=train_transform)
     val_ds = ImageFolder(f"{data_dir}\\val", transform=val_transform)
-    test_ds = ImageFolder(f"{data_dir}\\test", transform=val_transform)
     print(train_ds.class_to_idx)
 
     if subset_groesse is not None:
@@ -47,10 +48,24 @@ def lade_daten(model, data_dir, batch_size, num_workers, subset_groesse=None):
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    return train_ds, val_ds, train_loader, val_loader
+
+
+def lade_test_daten(model, data_dir, batch_size, num_workers):
+    """Wird erst in der Testrunde (M3) aufgerufen, nicht während des Trainings."""
+    data_config = timm.data.resolve_model_data_config(model)
+    mean, std = data_config["mean"], data_config["std"]
+
+    test_transform = transforms.Compose([
+        transforms.Resize((384, 384)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
+
+    test_ds = ImageFolder(f"{data_dir}\\test", transform=test_transform)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-
-    return train_ds, val_ds, test_ds, train_loader, val_loader, test_loader
-
+    return test_ds, test_loader
 
 def erstelle_optimizer_und_scheduler(model, learning_rate, weight_decay, epochs, warmup_epochs, steps_pro_epoche):
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)

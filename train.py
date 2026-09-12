@@ -9,10 +9,9 @@ if __name__ == "__main__":
 
     model = lade_modell(MODELL_NAME, PRETRAINED_PFAD, NUM_CLASSES, DEVICE)
 
-    train_ds, val_ds, test_ds, train_loader, val_loader, test_loader = lade_daten(
-        model, DATA_DIR, BATCH_SIZE, NUM_WORKERS, SUBSET_GROESSE
-    )
-
+    train_ds, val_ds, train_loader, val_loader = lade_daten(
+    model, DATA_DIR, BATCH_SIZE, NUM_WORKERS, SUBSET_GROESSE
+)
     criterion = nn.CrossEntropyLoss()
     optimizer, scheduler = erstelle_optimizer_und_scheduler(
         model, LEARNING_RATE, WEIGHT_DECAY, EPOCHS, WARMUP_EPOCHS, len(train_loader)
