@@ -16,7 +16,7 @@ WARMUP_EPOCHS = 2
 LEARNING_RATE = 5e-5
 WEIGHT_DECAY = 0.05
 NUM_WORKERS = 4
-SUBSET_GROESSE = 20  # None = ganzer Datensatz, Zahl = nur so viele Bilder pro Split (für Testdurchlauf)
+SUBSET_GROESSE = None  # None = ganzer Datensatz, Zahl = nur so viele Bilder pro Split (für Testdurchlauf)
 
 # Gerät
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

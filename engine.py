@@ -11,6 +11,7 @@ from torch.utils.data import Subset
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from safetensors.torch import load_file
+from collections import Counter
 
 
 def lade_modell(modell_name, pretrained_pfad, num_classes, device):
@@ -166,6 +167,7 @@ def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, crit
     print("=" * 75)
     print(f"Verwendetes Gerät: {DEVICE}")
     print(f"Modell liegt auf: {next(model.parameters()).device}")
+    print(Counter(val_ds.targets))
     print(f"Gesamtdauer: {formatiere_dauer(gesamtdauer)} für {epochs} Epochen\n")
     print(f"{'Epoche':>7} | {'Train Loss':>10} | {'Val Loss':>10} | {'Val Acc':>8} | {'Dauer':>10} | Beste?")
     print("-" * 75)
@@ -178,3 +180,11 @@ def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, crit
     print(f"Gespeichert unter: {checkpoint_pfad}")
 
     return verlauf, best_epoch, best_val_acc
+
+
+def lade_trainiertes_modell(modell_name, checkpoint_pfad, num_classes, device):
+    model = timm.create_model(modell_name, pretrained=False, num_classes=num_classes)
+    model.load_state_dict(torch.load(checkpoint_pfad, map_location=device))
+    model = model.to(device)
+    model.eval()
+    return model
