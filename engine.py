@@ -271,3 +271,20 @@ def speichere_modellinformationen(ordner, name, model_name, num_classes, bildgro
         json.dump(informationen, f, indent=2, ensure_ascii=False)
 
     return pfad
+
+def speichere_testergebnisse(ordner, name, class_to_idx, konfusionsmatrix, klassifikationsbericht):
+    os.makedirs(ordner, exist_ok=True)
+
+    daten = {
+        "name": name,
+        "zeitstempel": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "klassenzuordnung": class_to_idx,
+        "konfusionsmatrix": konfusionsmatrix.tolist(),
+        "klassifikationsbericht": klassifikationsbericht,
+    }
+
+    pfad = os.path.join(ordner, f"{name}.json")
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(daten, f, indent=2, ensure_ascii=False)
+
+    return pfad
