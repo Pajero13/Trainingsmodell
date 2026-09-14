@@ -12,6 +12,9 @@ from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from safetensors.torch import load_file
 from collections import Counter
+import json
+import os
+from datetime import datetime
 
 
 def lade_modell(modell_name, pretrained_pfad, num_classes, device):
@@ -24,18 +27,23 @@ def lade_modell(modell_name, pretrained_pfad, num_classes, device):
     print("Unerwartete Keys (sollte leer sein):", unexpected)
     return model.to(device)
 
-def lade_daten(model, data_dir, batch_size, num_workers, subset_groesse=None):
+def lade_daten(model, data_dir, batch_size, num_workers, subset_groesse=None, augmentierung="horizontal_flip"):
     data_config = timm.data.resolve_model_data_config(model)
     mean, std = data_config["mean"], data_config["std"]
+    bildgroesse = data_config["input_size"][-2:]
 
-    train_transform = transforms.Compose([
-        transforms.Resize((384, 384)),
-        transforms.RandomHorizontalFlip(),
+    train_schritte = [transforms.Resize(bildgroesse)]
+    if augmentierung == "horizontal_flip":
+        train_schritte.append(transforms.RandomHorizontalFlip())
+    elif augmentierung != "keine":
+        raise ValueError(f"Unbekannte Augmentierung: {augmentierung}")
+
+    train_transform = transforms.Compose(train_schritte + [
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std),
     ])
     val_transform = transforms.Compose([
-        transforms.Resize((384, 384)),
+        transforms.Resize(bildgroesse),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std),
     ])
@@ -85,31 +93,61 @@ def erstelle_optimizer_und_scheduler(model, learning_rate, weight_decay, epochs,
     return optimizer, scheduler
 
 
-def train_one_epoch(model, loader, optimizer, criterion, scheduler, scaler, device, dataset_size):
+def train_one_epoch(model, loader, optimizer, criterion, scheduler, scaler, device, dataset_size,
+                     accumulation_steps=1, precision="amp"):
     model.train()
     total_loss = 0.0
-    for bilder, labels in loader:
+    optimizer.zero_grad()
+
+    for step, (bilder, labels) in enumerate(loader):
         bilder, labels = bilder.to(device), labels.to(device)
-        optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+
+        if precision == "amp":
+            with torch.autocast(device_type="cuda"):
+                outputs = model(bilder)
+                loss = criterion(outputs, labels) / accumulation_steps
+            scaler.scale(loss).backward()
+        else:
             outputs = model(bilder)
-            loss = criterion(outputs, labels)
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+            loss = criterion(outputs, labels) / accumulation_steps
+            loss.backward()
+
+        if (step + 1) % accumulation_steps == 0:
+            if precision == "amp":
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
+
+        total_loss += loss.item() * accumulation_steps * bilder.size(0)
+
+    # Falls die letzte Gruppe nicht vollständig war (Restbatches), trotzdem einen letzten Schritt machen
+    if len(loader) % accumulation_steps != 0:
+        if precision == "amp":
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+        optimizer.zero_grad()
         scheduler.step()
-        total_loss += loss.item() * bilder.size(0)
+
     return total_loss / dataset_size
 
 
-def evaluate(model, loader, criterion, device, dataset_size):
+def evaluate(model, loader, criterion, device, dataset_size, precision="amp"):
     model.eval()
     total_loss = 0.0
     correct = 0
     with torch.no_grad():
         for bilder, labels in loader:
             bilder, labels = bilder.to(device), labels.to(device)
-            with torch.cuda.amp.autocast():
+            if precision == "amp":
+                with torch.autocast(device_type="cuda"):
+                    outputs = model(bilder)
+                    loss = criterion(outputs, labels)
+            else:
                 outputs = model(bilder)
                 loss = criterion(outputs, labels)
             total_loss += loss.item() * bilder.size(0)
@@ -128,16 +166,20 @@ def formatiere_dauer(sekunden):
 
 
 def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, criterion,
-              scheduler, scaler, device, epochs, checkpoint_pfad,DEVICE):
+              scheduler, scaler, device, epochs, checkpoint_pfad,
+              accumulation_steps=1, precision="amp", early_stopping_patience=None):
     best_val_acc = 0.0
     best_epoch = None
+    epochen_ohne_verbesserung = 0
     verlauf = []
     trainingsstart = time.time()
+
     for epoch in range(epochs):
         epochenstart = time.time()
 
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, scheduler, scaler, device, len(train_ds))
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device, len(val_ds))
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, scheduler, scaler,
+                                      device, len(train_ds), accumulation_steps, precision)
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device, len(val_ds), precision)
 
         epochendauer = time.time() - epochenstart
         ist_bestes = val_acc > best_val_acc
@@ -147,28 +189,29 @@ def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, crit
               f"Val Acc: {val_acc:.4f} | Dauer: {formatiere_dauer(epochendauer):>10} | {status}")
 
         verlauf.append({
-            "epoche": epoch + 1,
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "val_acc": val_acc,
-            "dauer_sek": epochendauer,
-            "bestes_modell": ist_bestes,
+            "epoche": epoch + 1, "train_loss": train_loss, "val_loss": val_loss,
+            "val_acc": val_acc, "dauer_sek": epochendauer, "bestes_modell": ist_bestes,
         })
 
         if ist_bestes:
             best_val_acc = val_acc
             best_epoch = epoch + 1
+            epochen_ohne_verbesserung = 0
             torch.save(model.state_dict(), checkpoint_pfad)
+        else:
+            epochen_ohne_verbesserung += 1
+
+        if early_stopping_patience is not None and epochen_ohne_verbesserung >= early_stopping_patience:
+            print(f"\nEarly Stopping: seit {epochen_ohne_verbesserung} Epochen keine Verbesserung "
+                  f"(Patience: {early_stopping_patience}). Training abgebrochen nach Epoche {epoch+1}.")
+            break
 
     gesamtdauer = time.time() - trainingsstart
 
     print("\n" + "=" * 75)
     print("TRAININGS-ÜBERSICHT")
     print("=" * 75)
-    print(f"Verwendetes Gerät: {DEVICE}")
-    print(f"Modell liegt auf: {next(model.parameters()).device}")
-    print(Counter(val_ds.targets))
-    print(f"Gesamtdauer: {formatiere_dauer(gesamtdauer)} für {epochs} Epochen\n")
+    print(f"Gesamtdauer: {formatiere_dauer(gesamtdauer)} für {len(verlauf)} durchgeführte Epochen\n")
     print(f"{'Epoche':>7} | {'Train Loss':>10} | {'Val Loss':>10} | {'Val Acc':>8} | {'Dauer':>10} | Beste?")
     print("-" * 75)
     for eintrag in verlauf:
@@ -179,8 +222,7 @@ def trainiere(model, train_loader, val_loader, train_ds, val_ds, optimizer, crit
     print(f"\nBestes Modell: Epoche {best_epoch}, Val Acc: {best_val_acc:.4f}")
     print(f"Gespeichert unter: {checkpoint_pfad}")
 
-    return verlauf, best_epoch, best_val_acc
-
+    return verlauf, best_epoch, best_val_acc, gesamtdauer
 
 def lade_trainiertes_modell(modell_name, checkpoint_pfad, num_classes, device):
     model = timm.create_model(modell_name, pretrained=False, num_classes=num_classes)
@@ -188,3 +230,44 @@ def lade_trainiertes_modell(modell_name, checkpoint_pfad, num_classes, device):
     model = model.to(device)
     model.eval()
     return model
+
+def speichere_modellinformationen(ordner, name, model_name, num_classes, bildgroesse,
+                                    batch_size, epochs, warmup_epochs, learning_rate,
+                                    weight_decay, num_workers, anzahl_train, anzahl_val,
+                                    best_epoch, best_val_acc, gesamtdauer_sek,
+                                    gradient_accumulation_steps, early_stopping_patience,
+                                    precision, augmentierung, verlauf):
+    os.makedirs(ordner, exist_ok=True)
+
+    informationen = {
+        "name": name,
+        "zeitstempel": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "modell": model_name,
+        "num_classes": num_classes,
+        "bildgroesse": list(bildgroesse),
+        "optimizer": "AdamW",
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "batch_size": batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "effektive_batch_size": batch_size * gradient_accumulation_steps,
+        "epochen_geplant": epochs,
+        "epochen_durchgefuehrt": len(verlauf),
+        "lr_scheduler": "Cosinus-Zerfall",
+        "warmup_epochen": warmup_epochs,
+        "early_stopping_patience": early_stopping_patience,
+        "augmentierung": augmentierung,
+        "precision": precision,
+        "num_workers": num_workers,
+        "anzahl_trainingsbilder": anzahl_train,
+        "anzahl_validierungsbilder": anzahl_val,
+        "bestes_ergebnis": {"epoche": best_epoch, "val_acc": best_val_acc},
+        "gesamtdauer_sek": round(gesamtdauer_sek, 1),
+        "epochen_verlauf": verlauf,
+    }
+
+    pfad = os.path.join(ordner, f"{name}.json")
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(informationen, f, indent=2, ensure_ascii=False)
+
+    return pfad
