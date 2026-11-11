@@ -1,5 +1,7 @@
 import argparse
 import os
+from datetime import datetime
+
 import torch
 from sklearn.metrics import classification_report, confusion_matrix
 
@@ -9,13 +11,23 @@ from engine import lade_trainiertes_modell, lade_test_daten, speichere_testergeb
 
 def parse_argumente():
     parser = argparse.ArgumentParser(description="Evaluiert ein trainiertes Modell auf dem Test-Split")
-    parser.add_argument("--name", required=True, help="Name des zu ladenden Modells (ohne .pt), aus MODELLE_ORDNER")
+    parser.add_argument("--name", required=True,
+                        help="Name des zu ladenden Modells (ohne .pt), aus MODELLE_ORDNER")
+    parser.add_argument("--auswertung", default=None,
+                        help="Name der Auswertungsdatei (ohne .json). "
+                             "Ohne Angabe: <modellname>_<Zeitstempel>")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_argumente()
     checkpoint_pfad = os.path.join(MODELLE_ORDNER, f"{args.name}.pt")
+
+    if args.auswertung:
+        auswertung_name = args.auswertung
+    else:
+        zeitstempel = datetime.now().strftime("%Y%m%d_%H%M%S")
+        auswertung_name = f"{args.name}_{zeitstempel}"
 
     model = lade_trainiertes_modell(MODELL_NAME, checkpoint_pfad, NUM_CLASSES, DEVICE)
     test_ds, test_loader = lade_test_daten(model, DATA_DIR, BATCH_SIZE, NUM_WORKERS)
@@ -43,6 +55,7 @@ if __name__ == "__main__":
     print(classification_report(alle_labels, alle_vorhersagen, target_names=klassen_namen))
 
     auswertung_pfad = speichere_testergebnisse(
-        AUSWERTUNG_ORDNER, args.name, test_ds.class_to_idx, konfusion, bericht_dict
+        AUSWERTUNG_ORDNER, auswertung_name, args.name,
+        test_ds.class_to_idx, konfusion, bericht_dict
     )
     print(f"\nAuswertung gespeichert unter: {auswertung_pfad}")
